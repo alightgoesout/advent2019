@@ -1,5 +1,6 @@
 use std::env;
 use std::io::{stdin, stdout, Result, Write};
+use std::time::Instant;
 
 mod day1;
 mod day2;
@@ -25,9 +26,13 @@ fn read_console_input() -> Result<String> {
 }
 
 fn execute_day(day: &String) {
+    let start = Instant::now();
     match day.trim().as_ref() {
         "1" => day1::execute(),
         "2" => day2::execute(),
         s => println!("Unknown day: '{}'", s),
     }
+
+    let duration = start.elapsed();
+    println!("Done in: {:?}", duration);
 }
