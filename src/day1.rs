@@ -2,8 +2,14 @@ use crate::input::read_lines;
 
 pub fn execute() {
     let input = read_lines("day1").unwrap();
-    println!("1:1 — Fuel Requirements Sum: {}", fuel_requirement_sum(&input));
-    println!("1:2 — Full Fuel Requirements Sum: {}", full_fuel_requirement_sum(&input));
+    println!(
+        "1:1 — Fuel Requirements Sum: {}",
+        fuel_requirement_sum(&input)
+    );
+    println!(
+        "1:2 — Full Fuel Requirements Sum: {}",
+        full_fuel_requirement_sum(&input)
+    );
 }
 
 fn fuel_requirement_sum(input: &Vec<String>) -> u32 {
@@ -30,14 +36,12 @@ fn full_fuel_requirement_sum(input: &Vec<String>) -> u32 {
 }
 
 fn full_fuel_requirement(mass: u32) -> u32 {
-    let mut total: u32 = 0;
-    let mut last_requirement = fuel_requirement(mass);
-    total += last_requirement;
-    while last_requirement > 0 {
-        last_requirement = fuel_requirement(last_requirement);
-        total += last_requirement;
-    }
-    total
+    let requirement = fuel_requirement(mass);
+    return if requirement == 0 {
+        0
+    } else {
+        requirement + full_fuel_requirement(requirement)
+    };
 }
 
 #[cfg(test)]
