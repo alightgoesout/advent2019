@@ -1,15 +1,16 @@
-use std::io::{stdin, stdout, Error, Write};
+use std::io::{stdin, stdout, Result, Write};
 
-mod input;
 mod day1;
+mod day2;
+mod input;
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<()> {
     let puzzle = read_console_input()?;
     execute_puzzle(puzzle);
     Ok(())
 }
 
-fn read_console_input() -> Result<String, Error> {
+fn read_console_input() -> Result<String> {
     print!("Puzzle to run: ");
     stdout().flush()?;
     let mut line = String::new();
@@ -20,6 +21,7 @@ fn read_console_input() -> Result<String, Error> {
 fn execute_puzzle(puzzle: String) {
     match puzzle.trim().as_ref() {
         "1" => day1::execute(),
+        "2" => day2::execute(),
         s => println!("Unknown puzzle: '{}'", s),
     }
 }
