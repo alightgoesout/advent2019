@@ -1,3 +1,4 @@
+use std::env;
 use std::io::{stdin, stdout, Result, Write};
 
 mod day1;
@@ -5,23 +6,28 @@ mod day2;
 mod input;
 
 fn main() -> Result<()> {
-    let puzzle = read_console_input()?;
-    execute_puzzle(puzzle);
+    let args: Vec<String> = env::args().collect();
+    if args.len() > 1 {
+        execute_day(&args[1]);
+    } else {
+        let day = read_console_input()?;
+        execute_day(&day);
+    }
     Ok(())
 }
 
 fn read_console_input() -> Result<String> {
-    print!("Puzzle to run: ");
+    print!("Day to run: ");
     stdout().flush()?;
     let mut line = String::new();
     stdin().read_line(&mut line)?;
     Ok(line)
 }
 
-fn execute_puzzle(puzzle: String) {
-    match puzzle.trim().as_ref() {
+fn execute_day(day: &String) {
+    match day.trim().as_ref() {
         "1" => day1::execute(),
         "2" => day2::execute(),
-        s => println!("Unknown puzzle: '{}'", s),
+        s => println!("Unknown day: '{}'", s),
     }
 }
