@@ -16,13 +16,28 @@ pub fn execute() {
         .map(|i| i.parse::<usize>().unwrap_or(0))
         .collect();
     let program_state = ProgramState {
-        int_code: int_code.update(1, 12).update(2, 2),
+        int_code,
         instruction_pointer: 0,
     };
     println!(
         "2:1 — Int code program result: {}",
-        program_state.run().int_code[0]
+        program_state.with_noun_and_vern(12, 2).run().int_code[0]
     );
+    println!(
+        "2:2 — Noun and verb for 19690720: {}",
+        find_noun_and_verb(&program_state)
+    );
+}
+
+fn find_noun_and_verb(program_state: &ProgramState) -> usize {
+    for noun in 0..100 {
+        for verb in 0..100 {
+            if program_state.with_noun_and_vern(noun, verb).run().int_code[0] == 19690720 {
+                return noun * 100 + verb;
+            }
+        }
+    }
+    panic!("Not found!")
 }
 
 impl ProgramState {
@@ -34,6 +49,13 @@ impl ProgramState {
         match self.opcode() {
             END_OPCODE => self,
             _ => self.execute_instruction().run(),
+        }
+    }
+
+    pub fn with_noun_and_vern(&self, noun: usize, verb: usize) -> ProgramState {
+        ProgramState {
+            int_code: self.int_code.update(1, noun).update(2, verb),
+            instruction_pointer: 0,
         }
     }
 
