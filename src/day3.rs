@@ -1,6 +1,48 @@
-use im_rc::{OrdMap, OrdSet, Vector};
+use crate::input::read_lines;
+use im_rc::{HashSet, Vector};
+use std::cmp::Ordering;
 
-pub fn execute() {}
+pub fn execute() {
+    let input = read_lines("day3").unwrap();
+    let wires: Vector<Wire> = input
+        .iter()
+        .map({ |l| l.split(",").map(|i| Instruction::from(i)).collect() })
+        .map({ |i| instructions_to_wire(&i) })
+        .collect();
+    println!(
+        "3:1 — Closest intersection: {:?}",
+        find_closest_intersections(&wires[0], &wires[1])
+            .map({ |p| distance_from_central_port(&p) })
+            .unwrap()
+    );
+}
+
+fn find_closest_intersections(w1: &Wire, w2: &Wire) -> Option<Point> {
+    compute_intersection(w1, w2)
+        .iter()
+        .min_by({ |p1, p2| compare_points(p1, p2) })
+        .map({ |p| p.clone() })
+}
+
+fn compute_intersection(w1: &Wire, w2: &Wire) -> Wire {
+    Wire::from(
+        w1.iter()
+            .filter({ |p| w2.contains(p) })
+            .map({ |p| p.clone() })
+            .collect::<Vec<Point>>(),
+    )
+}
+
+fn compare_points(p1: &Point, p2: &Point) -> Ordering {
+    distance_from_central_port(p1).cmp(&distance_from_central_port(p2))
+}
+
+fn distance_from_central_port(point: &Point) -> i32 {
+    point.0.abs() + point.1.abs()
+}
+
+type Point = (i32, i32);
+type Wire = HashSet<Point>;
 
 #[derive(Clone)]
 enum Direction {
@@ -11,174 +53,155 @@ enum Direction {
 }
 
 #[derive(Clone)]
-struct PathInstruction {
+struct Instruction {
     direction: Direction,
-    amount: u32,
+    amount: i32,
 }
 
-struct Path {
-    instructions: Vector<PathInstruction>,
-}
-
-#[derive(Clone, PartialEq, Debug)]
-struct Point {
-    x: u32,
-    y: u32,
-}
-
-#[derive(PartialEq, Debug)]
-struct Wire {
-    points: OrdMap<u32, OrdSet<u32>>,
-}
-
-impl Wire {
-    pub fn new() -> Wire {
-        Wire {
-            points: OrdMap::new(),
-        }
-    }
-
-    pub fn update(&self, x: u32, y: u32) -> Wire {
-        Wire {
-            points: self.points.alter(
-                { |o| o.or_else({ || Some(OrdSet::new()) }).map(|p| p.update(y)) },
-                x,
-            ),
+impl Direction {
+    fn from(s: &str) -> Direction {
+        match s {
+            "U" => Direction::Up,
+            "D" => Direction::Down,
+            "L" => Direction::Left,
+            "R" => Direction::Right,
+            _ => panic!("Unknown direction {}", s),
         }
     }
 }
 
-impl Wire {
-    pub fn from(origin: Point, path: Path) -> Wire {
-        let mut wire = Wire::new();
-        for instruction in path.instructions {
-            match instruction.direction {
-                Direction::Right => {
-                    for x in origin.x..(origin.x + instruction.amount + 1) {
-                        wire = wire.update(x, origin.y);
-                    }
+impl Instruction {
+    pub fn from(instruction: &str) -> Instruction {
+        let (start, end) = instruction.split_at(1);
+        Instruction {
+            direction: Direction::from(start),
+            amount: end.parse::<i32>().unwrap(),
+        }
+    }
+}
+
+fn instructions_to_wire(instructions: &Vector<Instruction>) -> Wire {
+    let mut wire = Wire::new();
+    let mut p = (0, 0);
+    for instruction in instructions {
+        match instruction.direction {
+            Direction::Right => {
+                for x in (p.0 + 1)..(p.0 + instruction.amount + 1) {
+                    wire = wire.update((x, p.1));
                 }
-                Direction::Left => {
-                    for x in (origin.x - instruction.amount)..(origin.x + 1) {
-                        wire = wire.update(x, origin.y);
-                    }
+                p = (p.0 + instruction.amount, p.1);
+            }
+            Direction::Left => {
+                for x in (p.0 - instruction.amount)..p.0 {
+                    wire = wire.update((x, p.1));
                 }
-                Direction::Up => {
-                    for y in origin.y..(origin.y + instruction.amount + 1) {
-                        wire = wire.update(origin.x, y);
-                    }
+                p = (p.0 - instruction.amount, p.1);
+            }
+            Direction::Up => {
+                for y in (p.1 + 1)..(p.1 + instruction.amount + 1) {
+                    wire = wire.update((p.0, y));
                 }
-                Direction::Down => {
-                    for y in (origin.y - instruction.amount)..(origin.y + 1) {
-                        wire = wire.update(origin.x, y);
-                    }
+                p = (p.0, p.1 + instruction.amount);
+            }
+            Direction::Down => {
+                for y in (p.1 - instruction.amount)..p.1 {
+                    wire = wire.update((p.0, y));
                 }
+                p = (p.0, p.1 - instruction.amount);
             }
         }
-
-        wire
     }
+    wire
 }
 
 #[cfg(test)]
-mod wire_from_origin_path_should {
-    use super::{Direction, Path, PathInstruction, Point, Wire};
-    use im_rc::{OrdMap, OrdSet};
+mod instructions_to_wire_should {
+    use super::*;
+    use im_rc::Vector;
 
     #[test]
     fn create_an_horizontal_wire_when_path_is_r4() {
-        let origin = Point { x: 1, y: 1 };
-        let path = Path {
-            instructions: im_rc::vector![PathInstruction {
-                direction: Direction::Right,
-                amount: 4
-            }],
-        };
+        let instructions = Vector::from(vec![Instruction {
+            direction: Direction::Right,
+            amount: 4,
+        }]);
 
-        let result = Wire::from(origin, path);
+        let result = instructions_to_wire(&instructions);
 
-        assert_eq!(
-            Wire {
-                points: OrdMap::from(vec![
-                    (1u32, OrdSet::from(vec![1u32])),
-                    (2u32, OrdSet::from(vec![1u32])),
-                    (3u32, OrdSet::from(vec![1u32])),
-                    (4u32, OrdSet::from(vec![1u32])),
-                    (5u32, OrdSet::from(vec![1u32])),
-                ])
-            },
-            result
-        );
+        assert_eq!(Wire::from(vec![(1, 0), (2, 0), (3, 0), (4, 0)]), result);
     }
 
     #[test]
     fn create_an_horizontal_wire_when_path_is_l4() {
-        let origin = Point { x: 4, y: 1 };
-        let path = Path {
-            instructions: im_rc::vector![PathInstruction {
-                direction: Direction::Left,
-                amount: 4
-            }],
-        };
+        let instructions = Vector::from(vec![Instruction {
+            direction: Direction::Left,
+            amount: 4,
+        }]);
 
-        let result = Wire::from(origin, path);
+        let result = instructions_to_wire(&instructions);
 
-        assert_eq!(
-            Wire {
-                points: OrdMap::from(vec![
-                    (0u32, OrdSet::from(vec![1u32])),
-                    (1u32, OrdSet::from(vec![1u32])),
-                    (2u32, OrdSet::from(vec![1u32])),
-                    (3u32, OrdSet::from(vec![1u32])),
-                    (4u32, OrdSet::from(vec![1u32])),
-                ])
-            },
-            result
-        );
+        assert_eq!(Wire::from(vec![(-1, 0), (-2, 0), (-3, 0), (-4, 0)]), result);
     }
 
     #[test]
     fn create_an_vertical_wire_when_path_is_u4() {
-        let origin = Point { x: 1, y: 1 };
-        let path = Path {
-            instructions: im_rc::vector![PathInstruction {
-                direction: Direction::Up,
-                amount: 4
-            }],
-        };
+        let instructions = Vector::from(vec![Instruction {
+            direction: Direction::Up,
+            amount: 4,
+        }]);
 
-        let result = Wire::from(origin, path);
+        let result = instructions_to_wire(&instructions);
 
-        assert_eq!(
-            Wire {
-                points: OrdMap::from(vec![(
-                    1u32,
-                    OrdSet::from(vec![1u32, 2u32, 3u32, 4u32, 5u32])
-                ),])
-            },
-            result
-        );
+        assert_eq!(Wire::from(vec![(0, 1), (0, 2), (0, 3), (0, 4)]), result);
     }
 
     #[test]
     fn create_an_vertical_wire_when_path_is_d4() {
-        let origin = Point { x: 1, y: 4 };
-        let path = Path {
-            instructions: im_rc::vector![PathInstruction {
-                direction: Direction::Down,
-                amount: 4
-            }],
-        };
+        let instructions = Vector::from(vec![Instruction {
+            direction: Direction::Down,
+            amount: 4,
+        }]);
 
-        let result = Wire::from(origin, path);
+        let result = instructions_to_wire(&instructions);
+
+        assert_eq!(Wire::from(vec![(0, -1), (0, -2), (0, -3), (0, -4)]), result);
+    }
+
+    #[test]
+    fn crate_a_wire_from_a_path_with_multiple_instructions() {
+        let instructions = Vector::from(vec![
+            Instruction::from("R8"),
+            Instruction::from("U5"),
+            Instruction::from("L5"),
+            Instruction::from("D3"),
+        ]);
+
+        let result = instructions_to_wire(&instructions);
 
         assert_eq!(
-            Wire {
-                points: OrdMap::from(vec![(
-                    1u32,
-                    OrdSet::from(vec![0u32, 1u32, 2u32, 3u32, 4u32])
-                ),])
-            },
+            Wire::from(vec![
+                (1, 0),
+                (2, 0),
+                (3, 0),
+                (3, 2),
+                (3, 3),
+                (3, 4),
+                (3, 5),
+                (4, 0),
+                (4, 5),
+                (5, 0),
+                (5, 5),
+                (6, 0),
+                (6, 5),
+                (7, 0),
+                (7, 5),
+                (8, 0),
+                (8, 1),
+                (8, 2),
+                (8, 3),
+                (8, 4),
+                (8, 5),
+            ]),
             result
         );
     }

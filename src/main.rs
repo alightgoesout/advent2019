@@ -1,3 +1,4 @@
+use im_rc::Vector;
 use std::env;
 use std::io::{stdin, stdout, Result, Write};
 use std::time::Instant;
@@ -8,7 +9,7 @@ mod day3;
 mod input;
 
 fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let args: Vector<String> = env::args().collect();
     if args.len() > 1 {
         execute_day(&args[1]);
     } else {
