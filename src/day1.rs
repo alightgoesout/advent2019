@@ -1,4 +1,5 @@
 use crate::input::read_lines;
+use im_rc::Vector;
 
 pub fn execute() {
     let input = read_lines("day1").unwrap();
@@ -12,7 +13,7 @@ pub fn execute() {
     );
 }
 
-fn fuel_requirement_sum(input: &Vec<String>) -> u32 {
+fn fuel_requirement_sum(input: &Vector<String>) -> u32 {
     input
         .iter()
         .map(|l| l.parse::<u32>().unwrap_or(0))
@@ -27,7 +28,7 @@ fn fuel_requirement(mass: u32) -> u32 {
     }
 }
 
-fn full_fuel_requirement_sum(input: &Vec<String>) -> u32 {
+fn full_fuel_requirement_sum(input: &Vector<String>) -> u32 {
     input
         .iter()
         .map(|l| l.parse::<u32>().unwrap_or(0))
