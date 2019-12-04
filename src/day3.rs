@@ -1,33 +1,67 @@
 use crate::input::read_lines;
-use im_rc::{Vector, HashSet};
+use im_rc::{HashMap, HashSet, Vector};
 use std::cmp::Ordering;
 use std::iter::FromIterator;
 
 pub fn execute() {
     let input = read_lines("day3").unwrap();
-    let wires: Vector<Wire> = input
-        .iter()
-        .map({ |l| l.split(",").map(|i| Instruction::from(i)).collect() })
-        .map({ |i| instructions_to_wire(&i) })
-        .collect();
+    let wires: Vector<Wire> = input.iter().map({ |l| str_to_wire(l) }).collect();
+    let w1 = &wires[0];
+    let w2 = &wires[1];
+    let intersections = compute_intersections(w1, w2);
     println!(
-        "3:1 — Closest intersection: {:?}",
-        find_closest_intersections(&wires[0], &wires[1])
+        "3:1 — Closest intersection distance: {:?}",
+        find_closest_intersection(&intersections)
             .map({ |p| distance_from_central_port(&p) })
             .unwrap()
     );
+    println!(
+        "3:2 — Lowest steps to an intersection: {:?}",
+        compute_lowest_steps_to_intersection(w1, w2, &intersections).unwrap()
+    );
 }
 
-fn find_closest_intersections(w1: &Wire, w2: &Wire) -> Option<Point> {
-    compute_intersections(w1, w2)
+fn find_closest_intersection(intersections: &HashSet<Point>) -> Option<Point> {
+    intersections
         .iter()
         .min_by({ |p1, p2| compare_points(p1, p2) })
         .map({ |p| p.clone() })
 }
 
-fn compute_intersections(w1: &Wire, w2: &Wire) -> Vector<Point> {
+fn compute_lowest_steps_to_intersection(
+    w1: &Wire,
+    w2: &Wire,
+    intersections: &HashSet<Point>,
+) -> Option<usize> {
+    let w1_steps = compute_steps_to_intersection(w1, intersections);
+    let w2_steps = compute_steps_to_intersection(w2, intersections);
+    w1_steps
+        .iter()
+        .map({ |(p, s)| w2_steps.get(p).unwrap() + s })
+        .min()
+}
+
+fn compute_steps_to_intersection(
+    wire: &Wire,
+    intersections: &HashSet<Point>,
+) -> HashMap<Point, usize> {
+    let mut result = HashMap::new();
+    wire.iter()
+        .enumerate()
+        .filter({ |(_, p)| intersections.contains(p) })
+        .for_each({
+            |(i, p)| {
+                if !result.contains_key(p) {
+                    result.insert(p.clone(), i + 1);
+                }
+            }
+        });
+    result
+}
+
+fn compute_intersections(w1: &Wire, w2: &Wire) -> HashSet<Point> {
     let w2_points = HashSet::<&Point>::from_iter(w2.iter());
-    Vector::from_iter(
+    HashSet::from_iter(
         w1.iter()
             .filter({ |p| w2_points.contains(p) })
             .map({ |p| p.clone() }),
@@ -79,6 +113,15 @@ impl Instruction {
             amount: end.parse::<i32>().unwrap(),
         }
     }
+}
+
+fn str_to_wire(instructions: &str) -> Wire {
+    instructions_to_wire(
+        &instructions
+            .split(",")
+            .map(|i| Instruction::from(i))
+            .collect(),
+    )
 }
 
 fn instructions_to_wire(instructions: &Vector<Instruction>) -> Wire {
@@ -205,5 +248,83 @@ mod instructions_to_wire_should {
             ]),
             result
         );
+    }
+}
+
+#[cfg(test)]
+mod compute_steps_to_intersection_should {
+    use super::*;
+
+    #[test]
+    fn return_15_and_20_for_the_first_example() {
+        let w1 = str_to_wire("R8,U5,L5,D3");
+        let w2 = str_to_wire("U7,R6,D4,L4");
+        let intersections = compute_intersections(&w1, &w2);
+
+        let result = compute_steps_to_intersection(&w1, &intersections);
+
+        assert_eq!(HashMap::from(vec![((6, 5), 15), ((3, 3), 20)]), result);
+    }
+}
+
+#[cfg(test)]
+mod compute_lowest_steps_to_intersection_should {
+    use super::*;
+    use im_rc::Vector;
+
+    #[test]
+    fn return_30_for_the_first_example() {
+        let w1 = str_to_wire("R8,U5,L5,D3");
+        let w2 = str_to_wire("U7,R6,D4,L4");
+        let intersections = compute_intersections(&w1, &w2);
+
+        let result = compute_lowest_steps_to_intersection(&w1, &w2, &intersections);
+
+        assert_eq!(Some(30), result);
+    }
+
+    #[test]
+    fn return_610_for_the_second_example() {
+        let w1 = str_to_wire("R75,D30,R83,U83,L12,D49,R71,U7,L72");
+        let w2 = str_to_wire("U62,R66,U55,R34,D71,R55,D58,R83");
+        let intersections = compute_intersections(&w1, &w2);
+
+        let result = compute_lowest_steps_to_intersection(&w1, &w2, &intersections);
+
+        assert_eq!(Some(610), result);
+    }
+
+    #[test]
+    fn return_410_for_the_third_example() {
+        let w1 = instructions_to_wire(&Vector::from(vec![
+            Instruction::from("R98"),
+            Instruction::from("U47"),
+            Instruction::from("R26"),
+            Instruction::from("D63"),
+            Instruction::from("R33"),
+            Instruction::from("U87"),
+            Instruction::from("L62"),
+            Instruction::from("D20"),
+            Instruction::from("R33"),
+            Instruction::from("U53"),
+            Instruction::from("R51"),
+        ]));
+        let w2 = instructions_to_wire(&Vector::from(vec![
+            Instruction::from("U98"),
+            Instruction::from("R91"),
+            Instruction::from("D20"),
+            Instruction::from("R16"),
+            Instruction::from("D67"),
+            Instruction::from("R40"),
+            Instruction::from("U7"),
+            Instruction::from("R15"),
+            Instruction::from("U6"),
+            Instruction::from("R7"),
+        ]));
+        let intersections = compute_intersections(&w1, &w2);
+
+        let result = compute_lowest_steps_to_intersection(&w1, &w2, &intersections);
+
+        assert_eq!(Some(410), result);
     }
 }
