@@ -1,6 +1,7 @@
 use crate::input::read_lines;
-use im_rc::{HashSet, Vector};
+use im_rc::{Vector, HashSet};
 use std::cmp::Ordering;
+use std::iter::FromIterator;
 
 pub fn execute() {
     let input = read_lines("day3").unwrap();
@@ -18,18 +19,18 @@ pub fn execute() {
 }
 
 fn find_closest_intersections(w1: &Wire, w2: &Wire) -> Option<Point> {
-    compute_intersection(w1, w2)
+    compute_intersections(w1, w2)
         .iter()
         .min_by({ |p1, p2| compare_points(p1, p2) })
         .map({ |p| p.clone() })
 }
 
-fn compute_intersection(w1: &Wire, w2: &Wire) -> Wire {
-    Wire::from(
+fn compute_intersections(w1: &Wire, w2: &Wire) -> Vector<Point> {
+    let w2_points = HashSet::<&Point>::from_iter(w2.iter());
+    Vector::from_iter(
         w1.iter()
-            .filter({ |p| w2.contains(p) })
-            .map({ |p| p.clone() })
-            .collect::<Vec<Point>>(),
+            .filter({ |p| w2_points.contains(p) })
+            .map({ |p| p.clone() }),
     )
 }
 
@@ -42,7 +43,7 @@ fn distance_from_central_port(point: &Point) -> i32 {
 }
 
 type Point = (i32, i32);
-type Wire = HashSet<Point>;
+type Wire = Vector<Point>;
 
 #[derive(Clone)]
 enum Direction {
@@ -87,25 +88,25 @@ fn instructions_to_wire(instructions: &Vector<Instruction>) -> Wire {
         match instruction.direction {
             Direction::Right => {
                 for x in (p.0 + 1)..(p.0 + instruction.amount + 1) {
-                    wire = wire.update((x, p.1));
+                    wire.push_back((x, p.1));
                 }
                 p = (p.0 + instruction.amount, p.1);
             }
             Direction::Left => {
-                for x in (p.0 - instruction.amount)..p.0 {
-                    wire = wire.update((x, p.1));
+                for x in ((p.0 - instruction.amount)..p.0).rev() {
+                    wire.push_back((x, p.1));
                 }
                 p = (p.0 - instruction.amount, p.1);
             }
             Direction::Up => {
                 for y in (p.1 + 1)..(p.1 + instruction.amount + 1) {
-                    wire = wire.update((p.0, y));
+                    wire.push_back((p.0, y));
                 }
                 p = (p.0, p.1 + instruction.amount);
             }
             Direction::Down => {
-                for y in (p.1 - instruction.amount)..p.1 {
-                    wire = wire.update((p.0, y));
+                for y in ((p.1 - instruction.amount)..p.1).rev() {
+                    wire.push_back((p.0, y));
                 }
                 p = (p.0, p.1 - instruction.amount);
             }
@@ -183,24 +184,24 @@ mod instructions_to_wire_should {
                 (1, 0),
                 (2, 0),
                 (3, 0),
-                (3, 2),
-                (3, 3),
-                (3, 4),
-                (3, 5),
                 (4, 0),
-                (4, 5),
                 (5, 0),
-                (5, 5),
                 (6, 0),
-                (6, 5),
                 (7, 0),
-                (7, 5),
                 (8, 0),
                 (8, 1),
                 (8, 2),
                 (8, 3),
                 (8, 4),
                 (8, 5),
+                (7, 5),
+                (6, 5),
+                (5, 5),
+                (4, 5),
+                (3, 5),
+                (3, 4),
+                (3, 3),
+                (3, 2),
             ]),
             result
         );
