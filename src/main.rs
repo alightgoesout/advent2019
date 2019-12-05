@@ -7,6 +7,7 @@ mod day1;
 mod day2;
 mod day3;
 mod day4;
+mod day5;
 mod input;
 
 fn main() -> Result<()> {
@@ -35,6 +36,7 @@ fn execute_day(day: &String) {
         "2" => day2::execute(),
         "3" => day3::execute(),
         "4" => day4::execute(),
+        "5" => day5::execute(),
         s => println!("Unknown day: '{}'", s),
     }
 
