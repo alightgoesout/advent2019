@@ -2,7 +2,7 @@
 # It is not intended for manual editing.
 [[package]]
 name = "advent2019"
-version = "6.2.0"
+version = "7.1.0"
 dependencies = [
  "im-rc 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
