@@ -1,8 +1,5 @@
 use crate::input::read_input;
-use im_rc::Vector;
-use std::cmp::Ordering;
-use std::iter::FromIterator;
-use std::ops::Index;
+use crate::intcode::{Intcode, LastOutput, Program, VectorInput};
 
 pub fn execute() {
     let intcode: Intcode = read_input("day7")
@@ -27,41 +24,37 @@ fn try_phase_settings(intcode: &Intcode, settings: &Vec<i32>) -> i32 {
         settings[3],
         settings[4],
     );
-    let amplifier_a = ProgramState::new(intcode, Input::new(Vector::from(vec![a, 0])));
-    let amplifier_a_result = run(amplifier_a);
-    let amplifier_b = ProgramState::new(
-        intcode,
-        Input::new(Vector::from(vec![
-            b,
-            amplifier_a_result.output.value.unwrap(),
-        ])),
+    let mut amplifier_a = Program::new(
+        intcode.clone(),
+        VectorInput::new(vec![a, 0]),
+        LastOutput::new(),
     );
-    let amplifier_b_result = run(amplifier_b);
-    let amplifier_c = ProgramState::new(
-        intcode,
-        Input::new(Vector::from(vec![
-            c,
-            amplifier_b_result.output.value.unwrap(),
-        ])),
+    amplifier_a.run();
+    let mut amplifier_b = Program::new(
+        intcode.clone(),
+        VectorInput::new(vec![b, amplifier_a.output.value.unwrap()]),
+        LastOutput::new(),
     );
-    let amplifier_c_result = run(amplifier_c);
-    let amplifier_d = ProgramState::new(
-        intcode,
-        Input::new(Vector::from(vec![
-            d,
-            amplifier_c_result.output.value.unwrap(),
-        ])),
+    amplifier_b.run();
+    let mut amplifier_c = Program::new(
+        intcode.clone(),
+        VectorInput::new(vec![c, amplifier_b.output.value.unwrap()]),
+        LastOutput::new(),
     );
-    let amplifier_d_result = run(amplifier_d);
-    let amplifier_e = ProgramState::new(
-        intcode,
-        Input::new(Vector::from(vec![
-            e,
-            amplifier_d_result.output.value.unwrap(),
-        ])),
+    amplifier_c.run();
+    let mut amplifier_d = Program::new(
+        intcode.clone(),
+        VectorInput::new(vec![d, amplifier_c.output.value.unwrap()]),
+        LastOutput::new(),
     );
-    let amplifier_e_result = run(amplifier_e);
-    amplifier_e_result.output.value.unwrap()
+    amplifier_d.run();
+    let mut amplifier_e = Program::new(
+        intcode.clone(),
+        VectorInput::new(vec![e, amplifier_d.output.value.unwrap()]),
+        LastOutput::new(),
+    );
+    amplifier_e.run();
+    amplifier_e.output.value.unwrap()
 }
 
 struct PermutationsGenerator {
@@ -105,300 +98,6 @@ impl Iterator for PermutationsGenerator {
             self.i += 1;
         }
         None
-    }
-}
-
-const END_OPCODE: i32 = 99;
-
-static INSTRUCTION_NB_PARAMETERS: [usize; 8] = [3, 3, 1, 1, 2, 2, 3, 3];
-
-static EXECUTORS: [OpcodeExecutor; 8] = [
-    ADD_EXECUTOR,
-    MULTIPLY_EXECUTOR,
-    INPUT_EXECUTOR,
-    OUTPUT_EXECUTOR,
-    JUMP_IF_TRUE_EXECUTOR,
-    JUMP_IF_FALSE_EXECUTOR,
-    LESS_THAN_EXECUTOR,
-    EQUALS_EXECUTOR,
-];
-
-static ADD_EXECUTOR: OpcodeExecutor = |state, parameters| {
-    let parameter1_value = state.read_parameter(0, parameters[0]);
-    let parameter2_value = state.read_parameter(1, parameters[1]);
-    let result = parameter1_value + parameter2_value;
-    let output_position = state.read_parameter(2, ParameterMode::Immediate);
-    let intcode = state.intcode.write(output_position as usize, result);
-    ProgramState {
-        intcode,
-        current_instruction: state.current_instruction + 4,
-        input: state.input.clone(),
-        output: state.output,
-    }
-};
-
-static MULTIPLY_EXECUTOR: OpcodeExecutor = |state, parameters| {
-    let parameter1_value = state.read_parameter(0, parameters[0]);
-    let parameter2_value = state.read_parameter(1, parameters[1]);
-    let result = parameter1_value * parameter2_value;
-    let output_position = state.read_parameter(2, ParameterMode::Immediate);
-    let intcode = state.intcode.write(output_position as usize, result);
-    ProgramState {
-        intcode,
-        current_instruction: state.current_instruction + 4,
-        input: state.input.clone(),
-        output: state.output,
-    }
-};
-
-static INPUT_EXECUTOR: OpcodeExecutor = |state, _parameters| {
-    let mut input = state.input.clone();
-    let result = input.read();
-    let output_position = state.read_parameter(0, ParameterMode::Immediate);
-    let intcode = state.intcode.write(output_position as usize, result);
-    ProgramState {
-        intcode,
-        current_instruction: state.current_instruction + 2,
-        input,
-        output: state.output,
-    }
-};
-
-static OUTPUT_EXECUTOR: OpcodeExecutor = |state, parameters| {
-    let value = state.read_parameter(0, parameters[0]);
-    let output = state.output.write(value);
-    ProgramState {
-        intcode: state.intcode.clone(),
-        current_instruction: state.current_instruction + 2,
-        input: state.input.clone(),
-        output,
-    }
-};
-
-static JUMP_IF_TRUE_EXECUTOR: OpcodeExecutor = |state, parameters| {
-    let value = state.read_parameter(0, parameters[0]);
-    let new_instruction = match value {
-        0 => state.current_instruction + 3,
-        _ => state.read_parameter(1, parameters[1]) as usize,
-    };
-    ProgramState {
-        intcode: state.intcode.clone(),
-        current_instruction: new_instruction,
-        input: state.input.clone(),
-        output: state.output,
-    }
-};
-
-static JUMP_IF_FALSE_EXECUTOR: OpcodeExecutor = |state, parameters| {
-    let value = state.read_parameter(0, parameters[0]);
-    let new_instruction = match value {
-        0 => state.read_parameter(1, parameters[1]) as usize,
-        _ => state.current_instruction + 3,
-    };
-    ProgramState {
-        intcode: state.intcode.clone(),
-        current_instruction: new_instruction,
-        input: state.input.clone(),
-        output: state.output,
-    }
-};
-
-static LESS_THAN_EXECUTOR: OpcodeExecutor = |state, parameters| {
-    let parameter1_value = state.read_parameter(0, parameters[0]);
-    let parameter2_value = state.read_parameter(1, parameters[1]);
-    let output_position = state.read_parameter(2, ParameterMode::Immediate);
-    let output = match parameter1_value.cmp(&parameter2_value) {
-        Ordering::Less => 1,
-        _ => 0,
-    };
-    let intcode = state.intcode.write(output_position as usize, output);
-    ProgramState {
-        intcode,
-        current_instruction: state.current_instruction + 4,
-        input: state.input.clone(),
-        output: state.output,
-    }
-};
-
-static EQUALS_EXECUTOR: OpcodeExecutor = |state, parameters| {
-    let parameter1_value = state.read_parameter(0, parameters[0]);
-    let parameter2_value = state.read_parameter(1, parameters[1]);
-    let output_position = state.read_parameter(2, ParameterMode::Immediate);
-    let output = match parameter1_value.cmp(&parameter2_value) {
-        Ordering::Equal => 1,
-        _ => 0,
-    };
-    let intcode = state.intcode.write(output_position as usize, output);
-    ProgramState {
-        intcode,
-        current_instruction: state.current_instruction + 4,
-        input: state.input.clone(),
-        output: state.output,
-    }
-};
-
-fn run(state: ProgramState) -> ProgramState {
-    let mut current_state = state;
-    while !current_state.is_over() {
-        let instruction = current_state.get_next_instruction();
-        let executor = EXECUTORS[(&instruction.0 - 1) as usize];
-        current_state = executor(&current_state, &instruction.1);
-    }
-    current_state
-}
-
-#[derive(Clone)]
-struct Input {
-    values: Vector<i32>,
-    current_position: usize,
-}
-
-impl Input {
-    fn new(values: Vector<i32>) -> Self {
-        Input {
-            values,
-            current_position: 0,
-        }
-    }
-
-    fn read(&mut self) -> i32 {
-        let value = self.values[self.current_position];
-        self.current_position += 1;
-        value
-    }
-}
-
-#[derive(Copy, Clone)]
-struct Output {
-    pub value: Option<i32>,
-}
-
-impl Output {
-    fn new() -> Self {
-        Output { value: None }
-    }
-
-    fn write(&self, out: i32) -> Output {
-        Output { value: Some(out) }
-    }
-}
-
-struct ProgramState {
-    intcode: Intcode,
-    current_instruction: usize,
-    input: Input,
-    output: Output,
-}
-
-#[derive(Clone, Debug)]
-struct Intcode {
-    code: Vector<i32>,
-}
-
-type OpcodeExecutor = fn(&ProgramState, parameters: &Vector<ParameterMode>) -> ProgramState;
-
-#[derive(PartialEq, Clone, Debug, Copy)]
-enum ParameterMode {
-    Position,
-    Immediate,
-}
-
-impl ProgramState {
-    pub fn new(intcode: &Intcode, input: Input) -> Self {
-        ProgramState {
-            intcode: intcode.clone(),
-            current_instruction: 0,
-            input,
-            output: Output::new(),
-        }
-    }
-
-    pub fn is_over(&self) -> bool {
-        self.instruction() == END_OPCODE
-    }
-
-    pub fn get_next_instruction(&self) -> (i32, Vector<ParameterMode>) {
-        parse_instruction(self.instruction())
-    }
-
-    pub fn read_parameter(&self, index: usize, mode: ParameterMode) -> i32 {
-        self.intcode
-            .read(self.current_instruction + 1 + index, mode)
-    }
-
-    fn instruction(&self) -> i32 {
-        self.intcode[self.current_instruction]
-    }
-}
-
-impl Intcode {
-    pub fn read(&self, position: usize, mode: ParameterMode) -> i32 {
-        let position_value = self.code[position];
-        match mode {
-            ParameterMode::Position => self.code[position_value as usize],
-            ParameterMode::Immediate => position_value,
-        }
-    }
-
-    pub fn write(&self, position: usize, value: i32) -> Intcode {
-        Intcode {
-            code: self.code.update(position, value),
-        }
-    }
-}
-
-impl FromIterator<i32> for Intcode {
-    fn from_iter<T: IntoIterator<Item = i32>>(iter: T) -> Self {
-        Intcode {
-            code: Vector::from_iter(iter),
-        }
-    }
-}
-
-impl From<Vec<i32>> for Intcode {
-    fn from(vec: Vec<i32>) -> Self {
-        Intcode {
-            code: Vector::from(vec),
-        }
-    }
-}
-
-impl Index<usize> for Intcode {
-    type Output = i32;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.code[index]
-    }
-}
-
-fn parse_instruction(instruction: i32) -> (i32, Vector<ParameterMode>) {
-    let opcode = instruction % 100;
-    let mut parameters = parse_parameters(instruction / 100);
-    fill_parameters(opcode, &mut parameters);
-    (opcode, parameters)
-}
-
-fn parse_parameters(instruction_parameters: i32) -> Vector<ParameterMode> {
-    let mut parameters = Vector::new();
-    let mut rest = instruction_parameters;
-
-    while rest > 0 {
-        parameters.push_back(match rest % 10 {
-            0 => ParameterMode::Position,
-            _ => ParameterMode::Immediate,
-        });
-        rest /= 10;
-    }
-
-    parameters
-}
-
-fn fill_parameters(opcode: i32, parameters: &mut Vector<ParameterMode>) {
-    let nb_parameters = *INSTRUCTION_NB_PARAMETERS
-        .get(opcode as usize - 1)
-        .unwrap_or(&0);
-    while parameters.len() < nb_parameters {
-        parameters.push_back(ParameterMode::Position)
     }
 }
 
