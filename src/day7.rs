@@ -1,5 +1,5 @@
 use crate::input::read_input;
-use crate::intcode::{Intcode, LastOutput, Program, VectorInput};
+use crate::intcode::{Intcode, Program, Pipe};
 
 pub fn execute() {
     let intcode: Intcode = read_input("day7")
@@ -17,44 +17,40 @@ fn find_best_phase_setting(intcode: &Intcode) -> Option<i32> {
 }
 
 fn try_phase_settings(intcode: &Intcode, settings: &Vec<i32>) -> i32 {
-    let (a, b, c, d, e) = (
-        settings[0],
-        settings[1],
-        settings[2],
-        settings[3],
-        settings[4],
-    );
-    let mut amplifier_a = Program::new(
-        intcode.clone(),
-        VectorInput::new(vec![a, 0]),
-        LastOutput::new(),
-    );
-    amplifier_a.run();
-    let mut amplifier_b = Program::new(
-        intcode.clone(),
-        VectorInput::new(vec![b, amplifier_a.output.value.unwrap()]),
-        LastOutput::new(),
-    );
-    amplifier_b.run();
-    let mut amplifier_c = Program::new(
-        intcode.clone(),
-        VectorInput::new(vec![c, amplifier_b.output.value.unwrap()]),
-        LastOutput::new(),
-    );
-    amplifier_c.run();
-    let mut amplifier_d = Program::new(
-        intcode.clone(),
-        VectorInput::new(vec![d, amplifier_c.output.value.unwrap()]),
-        LastOutput::new(),
-    );
-    amplifier_d.run();
-    let mut amplifier_e = Program::new(
-        intcode.clone(),
-        VectorInput::new(vec![e, amplifier_d.output.value.unwrap()]),
-        LastOutput::new(),
-    );
-    amplifier_e.run();
-    amplifier_e.output.value.unwrap()
+    let output_pipe = Pipe::new();
+    let mut amplifier_a = Program::new(intcode.clone());
+    let mut amplifier_b = Program::new(intcode.clone());
+    let mut amplifier_c = Program::new(intcode.clone());
+    let mut amplifier_d = Program::new(intcode.clone());
+    let mut amplifier_e = Program::new(intcode.clone());
+    amplifier_a.connect(&amplifier_b);
+    amplifier_b.connect(&amplifier_c);
+    amplifier_c.connect(&amplifier_d);
+    amplifier_d.connect(&amplifier_e);
+    amplifier_e.set_output(&output_pipe);
+    amplifier_a.write(settings[0]);
+    amplifier_a.write(0);
+    amplifier_b.write(settings[1]);
+    amplifier_c.write(settings[2]);
+    amplifier_d.write(settings[3]);
+    amplifier_e.write(settings[4]);
+    let mut results = [
+        amplifier_a.run(),
+        amplifier_b.run(),
+        amplifier_c.run(),
+        amplifier_d.run(),
+        amplifier_e.run(),
+    ];
+    while results.iter().any(|r| !r) {
+        results = [
+            amplifier_a.run(),
+            amplifier_b.run(),
+            amplifier_c.run(),
+            amplifier_d.run(),
+            amplifier_e.run(),
+        ];
+    }
+    output_pipe.read().unwrap()
 }
 
 struct PermutationsGenerator {

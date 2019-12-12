@@ -1,67 +1,97 @@
 use im_rc::Vector;
+use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::iter::FromIterator;
 use std::ops::Index;
+use std::rc::Rc;
 
 const END_CODE: i32 = 99;
 
-pub struct Program<I: Input, O: Output> {
+pub struct Program {
     state: ProgramState,
-    input: I,
-    pub output: O,
-    excutors: HashMap<OpCode, Box<dyn InstructionExecutor<I, O>>>,
+    input: Pipe,
+    output: Option<Pipe>,
+    excutors: HashMap<OpCode, Box<dyn InstructionExecutor>>,
 }
 
-impl<I: Input, O: Output> Program<I, O> {
-    pub fn new(intcode: Intcode, input: I, output: O) -> Self {
+impl Program {
+    pub fn new(intcode: Intcode) -> Self {
         Program {
             state: ProgramState {
+                status: ProgramStatus::Running,
                 intcode,
                 current_position: 0,
             },
-            input,
-            output,
+            input: Pipe::new(),
+            output: None,
             excutors: create_executors(),
         }
     }
 
-    pub fn run(&mut self) -> Option<ProgramState> {
-        self.last()
+    pub fn connect(&mut self, program: &Program) {
+        self.output = Some(program.input.clone());
     }
 
-    fn execute(&mut self) -> Option<ProgramState> {
-        match self.state.is_over() {
-            true => None,
+    pub fn set_output(&mut self, output: &Pipe) {
+        self.output = Some(output.clone());
+    }
+
+    pub fn write(&self, value: i32) {
+        self.input.write(value);
+    }
+
+    pub fn run(&mut self) -> bool {
+        while self.state.status == ProgramStatus::Running {
+            self.execute();
+        }
+        self.state.status == ProgramStatus::Over
+    }
+
+    fn execute(&mut self) {
+        self.state = match self.state.is_over() {
+            true => ProgramState {
+                status: ProgramStatus::Over,
+                intcode: self.state.intcode.clone(),
+                current_position: self.state.current_position,
+            },
             false => {
                 let instruction = self.state.current_instruction();
-                Some(self.excutors[&instruction.opcode].execute(
+                self.excutors[&instruction.opcode].execute(
                     &self.state,
                     &instruction,
-                    &mut self.input,
-                    &mut self.output,
-                ))
+                    self.input.clone(),
+                    self.output.clone(),
+                )
             }
         }
     }
 }
 
-impl<I: Input, O: Output> Iterator for Program<I, O> {
-    type Item = ProgramState;
+#[derive(Clone)]
+pub struct Pipe {
+    queue: Rc<RefCell<VecDeque<i32>>>,
+}
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.execute() {
-            Some(s) => {
-                self.state = s;
-                Some(self.state.clone())
-            }
-            None => None,
+impl Pipe {
+    pub fn new() -> Self {
+        Pipe {
+            queue: Rc::new(RefCell::new(VecDeque::new())),
         }
+    }
+
+    pub fn read(&self) -> Option<i32> {
+        self.queue.borrow_mut().pop_front()
+    }
+
+    pub fn write(&self, value: i32) {
+        self.queue.borrow_mut().push_back(value);
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ProgramState {
+    pub status: ProgramStatus,
     intcode: Intcode,
     current_position: usize,
 }
@@ -78,6 +108,13 @@ impl ProgramState {
     fn read_parameter(&self, index: usize, mode: &ParameterMode) -> i32 {
         self.intcode.read(self.current_position + 1 + index, mode)
     }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum ProgramStatus {
+    Running,
+    Waiting,
+    Over,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -189,60 +226,8 @@ impl OpCode {
     }
 }
 
-pub trait Input: Clone {
-    fn read(&mut self) -> Option<i32>;
-}
-
-pub trait Output: Clone {
-    fn write(&mut self, output: i32);
-}
-
-#[derive(Clone)]
-pub struct VectorInput {
-    vector: Vec<i32>,
-    position: usize,
-}
-
-impl VectorInput {
-    pub fn new(vector: Vec<i32>) -> Self {
-        VectorInput {
-            vector,
-            position: 0,
-        }
-    }
-}
-
-impl Input for VectorInput {
-    fn read(&mut self) -> Option<i32> {
-        match self.vector.get(self.position) {
-            Some(i) => {
-                self.position += 1;
-                Some(*i)
-            }
-            None => None,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct LastOutput {
-    pub value: Option<i32>,
-}
-
-impl LastOutput {
-    pub fn new() -> Self {
-        LastOutput { value: None }
-    }
-}
-
-impl Output for LastOutput {
-    fn write(&mut self, output: i32) {
-        self.value = Some(output);
-    }
-}
-
-fn create_executors<I: Input, O: Output>() -> HashMap<OpCode, Box<dyn InstructionExecutor<I, O>>> {
-    let mut map: HashMap<OpCode, Box<dyn InstructionExecutor<I, O>>> = HashMap::new();
+fn create_executors() -> HashMap<OpCode, Box<dyn InstructionExecutor>> {
+    let mut map: HashMap<OpCode, Box<dyn InstructionExecutor>> = HashMap::new();
     map.insert(OpCode::Add, Box::new(AddExecutor {}));
     map.insert(OpCode::Multiply, Box::new(MultiplyExecutor {}));
     map.insert(OpCode::Input, Box::new(InputExecutor {}));
@@ -254,25 +239,25 @@ fn create_executors<I: Input, O: Output>() -> HashMap<OpCode, Box<dyn Instructio
     map
 }
 
-trait InstructionExecutor<I: Input, O: Output> {
+trait InstructionExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        input: &mut I,
-        output: &mut O,
+        input: Pipe,
+        output: Option<Pipe>,
     ) -> ProgramState;
 }
 
 struct AddExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for AddExecutor {
+impl InstructionExecutor for AddExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        _input: &mut I,
-        _output: &mut O,
+        _input: Pipe,
+        _output: Option<Pipe>,
     ) -> ProgramState {
         let parameter1_value = state.read_parameter(0, instruction.get_parameter_mode(0));
         let parameter2_value = state.read_parameter(1, instruction.get_parameter_mode(1));
@@ -280,6 +265,7 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for AddExecutor {
         let output_position = state.read_parameter(2, &ParameterMode::Immediate);
         let intcode = state.intcode.write(output_position as usize, result);
         ProgramState {
+            status: ProgramStatus::Running,
             intcode,
             current_position: state.current_position + 4,
         }
@@ -288,13 +274,13 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for AddExecutor {
 
 struct MultiplyExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for MultiplyExecutor {
+impl InstructionExecutor for MultiplyExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        _input: &mut I,
-        _output: &mut O,
+        _input: Pipe,
+        _output: Option<Pipe>,
     ) -> ProgramState {
         let parameter1_value = state.read_parameter(0, instruction.get_parameter_mode(0));
         let parameter2_value = state.read_parameter(1, instruction.get_parameter_mode(1));
@@ -302,6 +288,7 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for MultiplyExecutor {
         let output_position = state.read_parameter(2, &ParameterMode::Immediate);
         let intcode = state.intcode.write(output_position as usize, result);
         ProgramState {
+            status: ProgramStatus::Running,
             intcode,
             current_position: state.current_position + 4,
         }
@@ -310,37 +297,47 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for MultiplyExecutor {
 
 struct InputExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for InputExecutor {
+impl InstructionExecutor for InputExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         _instruction: &Instruction,
-        input: &mut I,
-        _output: &mut O,
+        input: Pipe,
+        _output: Option<Pipe>,
     ) -> ProgramState {
-        let result = input.read().unwrap();
-        let output_position = state.read_parameter(0, &ParameterMode::Immediate);
-        let intcode = state.intcode.write(output_position as usize, result);
-        ProgramState {
-            intcode,
-            current_position: state.current_position + 2,
+        match input.read() {
+            Some(i) => {
+                let output_position = state.read_parameter(0, &ParameterMode::Immediate);
+                let intcode = state.intcode.write(output_position as usize, i);
+                ProgramState {
+                    status: ProgramStatus::Running,
+                    intcode,
+                    current_position: state.current_position + 2,
+                }
+            }
+            _ => ProgramState {
+                status: ProgramStatus::Waiting,
+                intcode: state.intcode.clone(),
+                current_position: state.current_position,
+            },
         }
     }
 }
 
 struct OutputExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for OutputExecutor {
+impl InstructionExecutor for OutputExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        _input: &mut I,
-        output: &mut O,
+        _input: Pipe,
+        output: Option<Pipe>,
     ) -> ProgramState {
         let value = state.read_parameter(0, instruction.get_parameter_mode(0));
-        output.write(value);
+        output.map(|s| s.write(value));
         ProgramState {
+            status: ProgramStatus::Running,
             intcode: state.intcode.clone(),
             current_position: state.current_position + 2,
         }
@@ -349,13 +346,13 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for OutputExecutor {
 
 struct JumpIfTrueExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for JumpIfTrueExecutor {
+impl InstructionExecutor for JumpIfTrueExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        _input: &mut I,
-        _output: &mut O,
+        _input: Pipe,
+        _output: Option<Pipe>,
     ) -> ProgramState {
         let value = state.read_parameter(0, instruction.get_parameter_mode(0));
         let new_position = match value {
@@ -363,6 +360,7 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for JumpIfTrueExecutor {
             _ => state.read_parameter(1, instruction.get_parameter_mode(1)) as usize,
         };
         ProgramState {
+            status: ProgramStatus::Running,
             intcode: state.intcode.clone(),
             current_position: new_position,
         }
@@ -371,13 +369,13 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for JumpIfTrueExecutor {
 
 struct JumpIfFalseExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for JumpIfFalseExecutor {
+impl InstructionExecutor for JumpIfFalseExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        _input: &mut I,
-        _output: &mut O,
+        _input: Pipe,
+        _output: Option<Pipe>,
     ) -> ProgramState {
         let value = state.read_parameter(0, instruction.get_parameter_mode(0));
         let new_position = match value {
@@ -385,6 +383,7 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for JumpIfFalseExecutor {
             _ => state.current_position + 3,
         };
         ProgramState {
+            status: ProgramStatus::Running,
             intcode: state.intcode.clone(),
             current_position: new_position,
         }
@@ -393,13 +392,13 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for JumpIfFalseExecutor {
 
 struct LessThanExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for LessThanExecutor {
+impl InstructionExecutor for LessThanExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        _input: &mut I,
-        _output: &mut O,
+        _input: Pipe,
+        _output: Option<Pipe>,
     ) -> ProgramState {
         let parameter1_value = state.read_parameter(0, instruction.get_parameter_mode(0));
         let parameter2_value = state.read_parameter(1, instruction.get_parameter_mode(1));
@@ -410,6 +409,7 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for LessThanExecutor {
         };
         let intcode = state.intcode.write(output_position as usize, output);
         ProgramState {
+            status: ProgramStatus::Running,
             intcode,
             current_position: state.current_position + 4,
         }
@@ -418,13 +418,13 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for LessThanExecutor {
 
 struct EqualsExecutor {}
 
-impl<I: Input, O: Output> InstructionExecutor<I, O> for EqualsExecutor {
+impl InstructionExecutor for EqualsExecutor {
     fn execute(
         &self,
         state: &ProgramState,
         instruction: &Instruction,
-        _input: &mut I,
-        _output: &mut O,
+        _input: Pipe,
+        _output: Option<Pipe>,
     ) -> ProgramState {
         let parameter1_value = state.read_parameter(0, instruction.get_parameter_mode(0));
         let parameter2_value = state.read_parameter(1, instruction.get_parameter_mode(1));
@@ -435,6 +435,7 @@ impl<I: Input, O: Output> InstructionExecutor<I, O> for EqualsExecutor {
         };
         let intcode = state.intcode.write(output_position as usize, output);
         ProgramState {
+            status: ProgramStatus::Running,
             intcode,
             current_position: state.current_position + 4,
         }
@@ -447,228 +448,231 @@ mod intcode_tests {
 
     #[test]
     fn execute_sample_code_with_add_and_multiply() {
-        let mut program = Program::new(
-            Intcode::from(vec![1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50]),
-            VectorInput::new(Vec::new()),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50,
+        ]));
 
-        let result = program.run();
+        program.run();
 
+        assert_eq!(program.state.status, ProgramStatus::Over);
         assert_eq!(
-            result.unwrap().intcode,
+            program.state.intcode,
             Intcode::from(vec![3500, 9, 10, 70, 2, 3, 11, 0, 99, 30, 40, 50])
         );
     }
 
     #[test]
     fn sample1_should_return_1_when_input_is_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 9, 8, 9, 10, 9, 4, 9, 99, -1, 8]),
-            VectorInput::new(vec![8]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 9, 8, 9, 10, 9, 4, 9, 99, -1, 8]));
+        program.write(8);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1));
     }
 
     #[test]
     fn sample1_should_return_0_when_input_is_not_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 9, 8, 9, 10, 9, 4, 9, 99, -1, 8]),
-            VectorInput::new(vec![7]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 9, 8, 9, 10, 9, 4, 9, 99, -1, 8]));
+        program.write(7);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(0));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(0));
     }
 
     #[test]
     fn sample2_should_return_1_when_input_is_less_than_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 9, 7, 9, 10, 9, 4, 9, 99, -1, 8]),
-            VectorInput::new(vec![5]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 9, 7, 9, 10, 9, 4, 9, 99, -1, 8]));
+        program.write(5);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1));
     }
 
     #[test]
     fn sample2_should_return_0_when_input_is_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 9, 7, 9, 10, 9, 4, 9, 99, -1, 8]),
-            VectorInput::new(vec![8]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 9, 7, 9, 10, 9, 4, 9, 99, -1, 8]));
+        program.write(8);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(0));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(0));
     }
 
     #[test]
     fn sample3_should_return_1_when_input_is_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 3, 1108, -1, 8, 3, 4, 3, 99]),
-            VectorInput::new(vec![8]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 3, 1108, -1, 8, 3, 4, 3, 99]));
+        program.write(8);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1));
     }
 
     #[test]
     fn sample3_should_return_0_when_input_is_not_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 3, 1108, -1, 8, 3, 4, 3, 99]),
-            VectorInput::new(vec![9]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 3, 1108, -1, 8, 3, 4, 3, 99]));
+        program.write(9);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(0));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(0));
     }
 
     #[test]
     fn sample4_should_return_1_when_input_is_less_than_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 3, 1107, -1, 8, 3, 4, 3, 99]),
-            VectorInput::new(vec![5]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 3, 1107, -1, 8, 3, 4, 3, 99]));
+        program.write(5);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1));
     }
 
     #[test]
     fn sample4_should_return_0_when_input_is_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 3, 1107, -1, 8, 3, 4, 3, 99]),
-            VectorInput::new(vec![8]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![3, 3, 1107, -1, 8, 3, 4, 3, 99]));
+        program.write(8);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(0));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(0));
     }
 
     #[test]
     fn sample5_should_return_0_when_input_is_0() {
-        let mut program = Program::new(
-            Intcode::from(vec![
-                3, 12, 6, 12, 15, 1, 13, 14, 13, 4, 13, 99, -1, 0, 1, 9,
-            ]),
-            VectorInput::new(vec![0]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            3, 12, 6, 12, 15, 1, 13, 14, 13, 4, 13, 99, -1, 0, 1, 9,
+        ]));
+        program.write(0);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(0));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(0));
     }
 
     #[test]
     fn sample5_should_return_1_when_input_is_not_0() {
-        let mut program = Program::new(
-            Intcode::from(vec![
-                3, 12, 6, 12, 15, 1, 13, 14, 13, 4, 13, 99, -1, 0, 1, 9,
-            ]),
-            VectorInput::new(vec![2]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            3, 12, 6, 12, 15, 1, 13, 14, 13, 4, 13, 99, -1, 0, 1, 9,
+        ]));
+        program.write(2);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1));
     }
 
     #[test]
     fn sample6_should_return_0_when_input_is_0() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 3, 1105, -1, 9, 1101, 0, 0, 12, 4, 12, 99, 1]),
-            VectorInput::new(vec![0]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            3, 3, 1105, -1, 9, 1101, 0, 0, 12, 4, 12, 99, 1,
+        ]));
+        program.write(0);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(0));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(0));
     }
 
     #[test]
     fn sample6_should_return_1_when_input_is_not_0() {
-        let mut program = Program::new(
-            Intcode::from(vec![3, 3, 1105, -1, 9, 1101, 0, 0, 12, 4, 12, 99, 1]),
-            VectorInput::new(vec![2]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            3, 3, 1105, -1, 9, 1101, 0, 0, 12, 4, 12, 99, 1,
+        ]));
+        program.write(2);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1));
     }
 
     #[test]
     fn sample7_should_return_999_when_input_is_less_than_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![
-                3, 21, 1008, 21, 8, 20, 1005, 20, 22, 107, 8, 21, 20, 1006, 20, 31, 1106, 0, 36,
-                98, 0, 0, 1002, 21, 125, 20, 4, 20, 1105, 1, 46, 104, 999, 1105, 1, 46, 1101, 1000,
-                1, 20, 4, 20, 1105, 1, 46, 98, 99,
-            ]),
-            VectorInput::new(vec![7]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            3, 21, 1008, 21, 8, 20, 1005, 20, 22, 107, 8, 21, 20, 1006, 20, 31, 1106, 0, 36, 98, 0,
+            0, 1002, 21, 125, 20, 4, 20, 1105, 1, 46, 104, 999, 1105, 1, 46, 1101, 1000, 1, 20, 4,
+            20, 1105, 1, 46, 98, 99,
+        ]));
+        program.write(7);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(999));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(999));
     }
 
     #[test]
     fn sample7_should_return_1000_when_input_is_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![
-                3, 21, 1008, 21, 8, 20, 1005, 20, 22, 107, 8, 21, 20, 1006, 20, 31, 1106, 0, 36,
-                98, 0, 0, 1002, 21, 125, 20, 4, 20, 1105, 1, 46, 104, 999, 1105, 1, 46, 1101, 1000,
-                1, 20, 4, 20, 1105, 1, 46, 98, 99,
-            ]),
-            VectorInput::new(vec![8]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            3, 21, 1008, 21, 8, 20, 1005, 20, 22, 107, 8, 21, 20, 1006, 20, 31, 1106, 0, 36, 98, 0,
+            0, 1002, 21, 125, 20, 4, 20, 1105, 1, 46, 104, 999, 1105, 1, 46, 1101, 1000, 1, 20, 4,
+            20, 1105, 1, 46, 98, 99,
+        ]));
+        program.write(8);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1000));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1000));
     }
 
     #[test]
     fn sample7_should_return_1001_when_input_is_more_than_8() {
-        let mut program = Program::new(
-            Intcode::from(vec![
-                3, 21, 1008, 21, 8, 20, 1005, 20, 22, 107, 8, 21, 20, 1006, 20, 31, 1106, 0, 36,
-                98, 0, 0, 1002, 21, 125, 20, 4, 20, 1105, 1, 46, 104, 999, 1105, 1, 46, 1101, 1000,
-                1, 20, 4, 20, 1105, 1, 46, 98, 99,
-            ]),
-            VectorInput::new(vec![9]),
-            LastOutput::new(),
-        );
+        let mut program = Program::new(Intcode::from(vec![
+            3, 21, 1008, 21, 8, 20, 1005, 20, 22, 107, 8, 21, 20, 1006, 20, 31, 1106, 0, 36, 98, 0,
+            0, 1002, 21, 125, 20, 4, 20, 1105, 1, 46, 104, 999, 1105, 1, 46, 1101, 1000, 1, 20, 4,
+            20, 1105, 1, 46, 98, 99,
+        ]));
+        program.write(9);
+        let output = Pipe::new();
+        program.set_output(&output);
 
         program.run();
 
-        assert_eq!(program.output.value, Some(1001));
+        assert_eq!(program.state.status, ProgramStatus::Over);
+        assert_eq!(output.read(), Some(1001));
     }
 }
