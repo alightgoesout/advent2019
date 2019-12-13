@@ -41,7 +41,14 @@ impl Program {
         self.input.write(value);
     }
 
+    pub fn read(&self) -> Option<i32> {
+        self.output.clone().and_then(|p| p.peek())
+    }
+
     pub fn run(&mut self) -> bool {
+        if self.state.status != ProgramStatus::Over {
+            self.execute();
+        }
         while self.state.status == ProgramStatus::Running {
             self.execute();
         }
@@ -81,11 +88,16 @@ impl Pipe {
     }
 
     pub fn read(&self) -> Option<i32> {
-        self.queue.borrow_mut().pop_front()
+        let value = self.queue.borrow_mut().pop_front();
+        value
     }
 
     pub fn write(&self, value: i32) {
         self.queue.borrow_mut().push_back(value);
+    }
+
+    pub fn peek(&self) -> Option<i32> {
+        self.queue.borrow().front().cloned()
     }
 }
 
@@ -443,6 +455,22 @@ impl InstructionExecutor for EqualsExecutor {
 }
 
 #[cfg(test)]
+mod pipe_should {
+    use super::*;
+
+    #[test]
+    fn read_a_value_written_to_one_of_its_clones() {
+        let pipe = Pipe::new();
+        let clone = pipe.clone();
+
+        clone.write(33);
+        let result = pipe.read();
+
+        assert_eq!(result, Some(33));
+    }
+}
+
+#[cfg(test)]
 mod intcode_tests {
     use super::*;
 
@@ -674,5 +702,20 @@ mod intcode_tests {
 
         assert_eq!(program.state.status, ProgramStatus::Over);
         assert_eq!(output.read(), Some(1001));
+    }
+
+    #[test]
+    fn it_should_wait_for_input_then_resume() {
+        let mut program = Program::new(Intcode::from(vec![3, 3, 99, 0]));
+
+        let result = program.run();
+
+        assert_eq!(result, false);
+
+        program.write(33);
+        let result = program.run();
+
+        assert_eq!(result, true);
+        assert_eq!(program.state.intcode, Intcode::from(vec![3, 3, 99, 33]));
     }
 }
